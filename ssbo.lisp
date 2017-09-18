@@ -159,7 +159,9 @@
                                             '(coerce value 'double-float)
                                             '(coerce value 'single-float)))
                                        (:int
-                                        '(coerce value 'integer))))))))
+                                        '(coerce value 'integer))
+                                       (:uint
+                                        '(coerce value 'unsigned-byte))))))))
           (ecase (car type)
             (:vec
              (let ((fn (gensym (format nil "~@:(vec~a/~a.~)"
