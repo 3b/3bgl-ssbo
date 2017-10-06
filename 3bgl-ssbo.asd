@@ -5,4 +5,6 @@
   :depends-on (alexandria glsl-packing)
   :serial t
   :components ((:file "package")
-               (:file "ssbo")))
+               (:file "ssbo")
+               (:file "walker")
+               (:file "ssbo-direct")))

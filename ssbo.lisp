@@ -75,9 +75,9 @@
         (loop for (name nil . rest) in structs
               do (push `(,name
                          (:struct
-                          ()
-                          ,@(glsl-packing:expand-glsl-types
-                             (getf rest :components))))
+                             ()
+                           ,@(glsl-packing:expand-glsl-types
+                              (getf rest :components))))
                        pack))
         (loop for (name nil . rest) in ssbos
               when (getf (getf rest :layout) :std430)
@@ -98,6 +98,7 @@
                (last (car (last (getf type :members))))
                (struct (assoc (cadar (getf last :type)) packed :key 'car)))
           (list :packing type
+                :type buffer-name
                 :struct (car struct)
                 :types (alexandria:plist-hash-table
                         (loop for ((n) p) in packed
@@ -109,7 +110,7 @@
   (alexandria:plist-hash-table
    (reverse (alexandria:hash-table-plist glsl-packing:*base-types*))
    :test 'equalp))
-
+(cffi:defctype bool :int32)
 (defparameter *foreign-type-map*
   (alexandria:plist-hash-table
    '((:float 32) :float
@@ -123,7 +124,7 @@
      (:uint 16) :uint16
      (:uint 32) :uint32
      (:uint 64) :uint64
-     (:bool) :int32)
+     (:bool) 'bool)
    :test 'equalp))
 
 (defun variable-size-field (packing)
@@ -150,18 +151,18 @@
             (setf (gethash type *writer-functions*)
                   (list fn
                         `(,fn (pointer value &optional (index 0))
-                              (setf (cffi:mem-aref pointer ,ctype index)
-                                    ,(ecase (car type)
-                                       (:bool
-                                        `(if value 1 0))
-                                       (:float
-                                        (if (= (second type) 64)
-                                            '(coerce value 'double-float)
-                                            '(coerce value 'single-float)))
-                                       (:int
-                                        '(coerce value 'integer))
-                                       (:uint
-                                        '(coerce value 'unsigned-byte))))))))
+                             (setf (cffi:mem-aref pointer ,ctype index)
+                                   ,(ecase (car type)
+                                      (:bool
+                                       `(if value 1 0))
+                                      (:float
+                                       (if (= (second type) 64)
+                                           '(coerce value 'double-float)
+                                           '(coerce value 'single-float)))
+                                      (:int
+                                       '(coerce value 'integer))
+                                      (:uint
+                                       '(coerce value 'unsigned-byte))))))))
           (ecase (car type)
             (:vec
              (let ((fn (gensym (format nil "~@:(vec~a/~a.~)"
@@ -172,12 +173,12 @@
                (setf (gethash type *writer-functions*)
                      (list fn
                            `(,fn (pointer value)
-                                 ,@(loop for i below (third type)
-                                         append (make-value-writer
-                                                 (second type)
-                                                 'pointer
-                                                 `(elt value ,i)
-                                                 :index i)))))))
+                                ,@(loop for i below (third type)
+                                        append (make-value-writer
+                                                (second type)
+                                                'pointer
+                                                `(elt value ,i)
+                                                :index i)))))))
             (:mat
              ;; accept either a 4x4 or MxN matrix
              (let ((fn (gensym (format nil "~@:(mat~ax~a/~a.~)"
@@ -194,25 +195,25 @@
                (setf (gethash type *writer-functions*)
                      (list fn
                            `(,fn (pointer value)
-                                 (cond
-                                   ((= (array-total-size value)
-                                       ,element-count)
-                                    ;; fixme: handle matrix-stride
-                                    (loop for i below ,element-count
-                                          do ,@(make-value-writer
-                                                (second type)
-                                                'pointer
-                                                `(elt value i)
-                                                :index 'i)))
-                                   ((= (array-total-size value) 16)
-                                    ;; todo: copy from upper-left of
-                                    ;; column-major 4x4 array
-                                    )
-                                   #++
-                                   ((= (array-rank value) 2)
-                                    ;; todo: copy from upper-left of 2d array,
-                                    ;; fill extra with identity
-                                    )))))))
+                                (cond
+                                  ((= (array-total-size value)
+                                      ,element-count)
+                                   ;; fixme: handle matrix-stride
+                                   (loop for i below ,element-count
+                                         do ,@(make-value-writer
+                                               (second type)
+                                               'pointer
+                                               `(elt value i)
+                                               :index 'i)))
+                                  ((= (array-total-size value) 16)
+                                   ;; todo: copy from upper-left of
+                                   ;; column-major 4x4 array
+                                   )
+                                  #++
+                                  ((= (array-rank value) 2)
+                                   ;; todo: copy from upper-left of 2d array,
+                                   ;; fill extra with identity
+                                   )))))))
             (:array
              (let ((fn (gensym (format nil "~@:(array~a/~a.~)"
                                        (third type)
@@ -228,15 +229,15 @@
                          (list
                           fn
                           `(,fn (pointer value)
-                                (--- array)))))))
+                               (--- array)))))))
             (:struct
-             (let ((fn (gensym (format nil "~@:(struct/~a.~)" orig-type))))
-               (setf (gethash orig-type *writer-functions*)
-                     (list fn
-                           `(,fn (pointer value)
-                                 ,@(make-slot-writers (getf (cdr type) :members)
-                                                      'value 'pointer
-                                                      *writer-defaults*))))))))))
+                (let ((fn (gensym (format nil "~@:(struct/~a.~)" orig-type))))
+                  (setf (gethash orig-type *writer-functions*)
+                        (list fn
+                              `(,fn (pointer value)
+                                   ,@(make-slot-writers (getf (cdr type) :members)
+                                                        'value 'pointer
+                                                        *writer-defaults*))))))))))
   (let ((fn (car (gethash type *writer-functions*))))
     (when fn
       (list (list* fn pointer value (when index (list index)))))))
@@ -247,7 +248,7 @@
         (typecase type
           ((cons (eql :bool))
            nil)
-          ((cons (eql :int))
+          ((cons (member :int :uint))
            0)
           ((cons (eql :float))
            0.0)
@@ -292,8 +293,8 @@
     (let ((*package* (or (find-package '3bgl-ssbo) *package*))
           ;; calculate body first so we can add local functions around it
           (body `((assert (<= (+ ,base
-                                 ,@ (when stride
-                                      `((* ,stride (length entries)))))
+                                  ,@ (when stride
+                                       `((* ,stride (length entries)))))
                               size))
                   ,@(when count-slot
                       `((setf (gethash ',(getf count-slot :name) globals)
@@ -311,6 +312,11 @@
       (if layout
           (let ((l `(lambda (globals pointer size &key entries)
                       (declare (ignorable entries))
+                      (unless (zerop (mod (cffi:pointer-address pointer)
+                                          ,(or (getf (getf layout :packing) :align)
+                                               0)))
+                        (break "align? ~s ~s" pointer
+                               ,(getf (getf layout :packing) :align)))
                       (labels (,@ (remove nil
                                     (mapcar 'second
                                             (alexandria:hash-table-values
