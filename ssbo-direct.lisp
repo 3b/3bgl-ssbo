@@ -101,7 +101,7 @@
   (unless (buffer b)
     (assert (plusp (size b)))
     (assert (not (pointer b)))
-    (loop for r in (ranges b) do (assert (not (sync r))))
+    (loop for r across (ranges b) do (assert (not (sync r))))
     (let ((bbuf (gl:create-buffer)))
       (gl:named-buffer-storage bbuf nil (list* (access b)
                                                '(:map-coherent :map-persistent
@@ -110,9 +110,9 @@
       (setf (slot-value b 'buffer) bbuf)))
   (unless (pointer b)
     (assert (buffer b))
-    (setf (slot-value (buffer b) 'pointer)
+    (setf (slot-value b 'pointer)
           (%gl:map-named-buffer-range
-           b 0 (size b)
+           (buffer b) 0 (size b)
            (list :map-coherent :map-persistent (access b))))))
 
 (defun current-region (b)
@@ -147,13 +147,13 @@
       (let ((sync (shiftf (sync cur) nil)))
         ;; try once with no timeout
         (loop with w = (%gl:client-wait-sync sync nil 0)
-              with delay = (* 10 1000000) ;; in ns
+              with delay = (* 1 1000000) ;; in ns
               with start = (get-internal-real-time)
               for waited from 0
               until (member w '(:already-signaled :condition-satisfied
                                 :already-signaled-apple
                                 :condition-satisfied-apple))
-              when (= waited 3)
+              when (= waited 10)
                 ;; if we waited a few frames, complain
                 do (cerror "Keep waiting" "waited ~s (~s) ms for sync on region ~s(~s) of buffer ~s? last result = ~s"
                            (floor (* waited delay) 1000000)
@@ -306,9 +306,10 @@
                             append (make-slot-writer
                                     s *pointer-var*
                                     (default-for-type s))))))
-        `(multiple-value-prog1
-             ,(funcall body)
-           ,(set-defaults))))))
+        (let ((def (set-defaults)))
+          `(progn
+            ,(set-defaults)
+            ,(funcall body)))))))
 
 (defun mark-slot-written (slot-name)
   (let* ((index (gethash slot-name *slots-index*)))
@@ -537,7 +538,11 @@
                   ;; can't bind some targets with bind-buffer-range
                   ;; so just bind whole thing and return an offset
                   (prog1 ,bind-start
-                    (%gl:bind-buffer target (buffer ,ssbo))
+                    (when target
+                      ;; might not need to actually bind it if just
+                      ;; attaching to a vao. (possibly should have
+                      ;; better indicator than NIL for that?)
+                      (%gl:bind-buffer target (buffer ,ssbo)))
                     (setf (current-offset ,ssbo)
                           ;; fixme: figure out correct value (needs to
                           ;; be at least alignment of struct, possibly
