@@ -2,7 +2,7 @@
   :description "writer for OpenGL SSBO/UBO data"
   :license "MIT"
   :author "Bart Botta <00003b at gmail.com>"
-  :depends-on (alexandria glsl-packing)
+  :depends-on (alexandria glsl-packing trivial-garbage)
   :serial t
   :components ((:file "package")
                (:file "ssbo")
