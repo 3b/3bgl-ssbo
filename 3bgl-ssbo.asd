@@ -5,6 +5,7 @@
   :depends-on (alexandria glsl-packing trivial-garbage cl-opengl)
   :serial t
   :components ((:file "package")
+               (:file "buffer")
                (:file "ssbo")
                (:file "walker")
                (:file "ssbo-direct")))

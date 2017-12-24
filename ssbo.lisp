@@ -8,7 +8,7 @@
   ((buffer :accessor buffer :initform nil)
    (dirty :accessor dirty :initform t)
    (packing :accessor packing :initform nil :initarg :packing)
-   (ssbo-size :accessor ssbo-size :initform nil)
+   #++(ssbo-size :accessor ssbo-size :initform nil)
    (writer :accessor writer :initform nil)
    ;; if SSBO has variable sized array as last element, optionally
    ;; write # of entries into specified slot of top-level block.
@@ -28,7 +28,11 @@
                                                 (count-slot ssbo))))
   (setf (dirty ssbo) t))
 
+(defmethod ssbo-size ((ssbo ssbo))
+  (size (buffer ssbo)))
+
 (defmethod bind-ssbo ((ssbo ssbo) index)
+  (break "bind1")
   (when (and (packing ssbo)
              (writer ssbo))
     ;; make sure buffer is current
@@ -46,17 +50,23 @@
         ;; (re)create buffer if needed
         (when resize
           (when (buffer ssbo)
-            (gl:delete-buffers (list (shiftf (buffer ssbo) nil))))
-          (setf (buffer ssbo) (gl:create-buffer))
-          (gl:named-buffer-storage (buffer ssbo) nil '(:dynamic-storage)
-                                   :end buffer-size)
-          (setf (ssbo-size ssbo) buffer-size))
-        (cffi:with-foreign-object (p :char buffer-size)
-          (funcall (writer ssbo) (data ssbo) p buffer-size)
-          (%gl:named-buffer-sub-data (buffer ssbo) 0 (ssbo-size ssbo) p))))
+            (destroy (list (shiftf (buffer ssbo) nil))))
+          (cffi:with-foreign-object (p :char buffer-size)
+            (funcall (writer ssbo) (data ssbo) p buffer-size)
+            (setf (buffer ssbo)
+                  (make-instance 'buffer :size buffer-size
+                                         :flags '(:dynamic-storage)
+                                         :data p)))
+          #++(setf (buffer ssbo) (gl:create-buffer))
+          #++(gl:named-buffer-storage (buffer ssbo) nil '(:dynamic-storage)
+                                      :end buffer-size)
+          #++(setf (ssbo-size ssbo) buffer-size))
+        #++(cffi:with-foreign-object (p :char buffer-size)
+             (funcall (writer ssbo) (data ssbo) p buffer-size)
+             (%gl:named-buffer-sub-data (buffer ssbo) 0 (ssbo-size ssbo) p))))
     ;; bind buffer
     (when (buffer ssbo)
-      (%gl:bind-buffer-base :shader-storage-buffer index (buffer ssbo)))))
+      (bind-buffer-base :shader-storage-buffer index (buffer ssbo)))))
 
 (defun get-buffer-for-binding (ssbos index)
   (car
@@ -66,8 +76,7 @@
             ssbos)))
 
 (defun calculate-layout (ssbos structs &key index name)
-  (let* (
-         (buffer-name (if name
+  (let* ((buffer-name (if name
                           name
                           (get-buffer-for-binding ssbos (or index 0)))))
     (when buffer-name
