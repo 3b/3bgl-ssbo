@@ -14,16 +14,25 @@
    ;; write # of entries into specified slot of top-level block.
    (count-slot :accessor count-slot :initform nil :initarg :count-slot)
    ;; todo: support more than just hash tables
-   (data :accessor data :initform (make-hash-table) :initarg :data)))
+   (data :accessor data :initform (make-hash-table) :initarg :data)
+   ;; easier for generic code to deal with variable-sized struct if it
+   ;; doesn't need to know name of variable-sized field, so optionally
+   ;; store it separately instead of getting it from DATA
+   (variable-size-data :accessor variable-size-data :initform nil
+                       :initarg :variable-size-data)))
+
+(defmethod destroy ((ssbo ssbo))
+  (when (buffer ssbo)
+    (destroy (shiftf (buffer ssbo) nil))))
 
 (defun make-ssbo (&rest args &key packing index name count-slot data)
   (declare (ignore packing index name count-slot data))
   (apply #'make-instance 'ssbo args))
 
-(defmethod update-ssbo-layout (ssbo layout)
+(defmethod update-ssbo-layout (ssbo layout &key (defaults (make-hash-table)))
   (setf (packing ssbo) layout)
   ;; todo: implement defaults for var-sized array entries
-  (let ((*writer-defaults* (make-hash-table)))
+  (let ((*writer-defaults* defaults))
     (setf (writer ssbo) (make-writer-for-layout (packing ssbo)
                                                 (count-slot ssbo))))
   (setf (dirty ssbo) t))
@@ -32,38 +41,40 @@
   (size (buffer ssbo)))
 
 (defmethod bind-ssbo ((ssbo ssbo) index)
-  (break "bind1")
   (when (and (packing ssbo)
              (writer ssbo))
     ;; make sure buffer is current
     (let* ((packing (packing ssbo))
            (variable-size-field (variable-size-field (getf packing :packing)))
            (data (data ssbo))
-           (count (length (gethash variable-size-field data)))
+           (variable-size-data (or (variable-size-data ssbo)
+                                   (gethash variable-size-field data)))
+           (count (length variable-size-data))
            (base (getf packing :base))
            (stride (or (getf packing :stride) 0))
            (buffer-size (+ base (* count stride)))
            (resize (not (and (buffer ssbo)
                              (eql buffer-size (ssbo-size ssbo))))))
+      ;; not sure if this should be an error yet, but probably a sign
+      ;; of problems...
+      (when (and (variable-size-data ssbo))
+        (assert (zerop (length (gethash variable-size-field data)))))
       ;; need to upload data
       (when (or (dirty ssbo) resize)
         ;; (re)create buffer if needed
         (when resize
-          (when (buffer ssbo)
-            (destroy (list (shiftf (buffer ssbo) nil))))
-          (cffi:with-foreign-object (p :char buffer-size)
-            (funcall (writer ssbo) (data ssbo) p buffer-size)
-            (setf (buffer ssbo)
-                  (make-instance 'buffer :size buffer-size
-                                         :flags '(:dynamic-storage)
-                                         :data p)))
-          #++(setf (buffer ssbo) (gl:create-buffer))
-          #++(gl:named-buffer-storage (buffer ssbo) nil '(:dynamic-storage)
-                                      :end buffer-size)
-          #++(setf (ssbo-size ssbo) buffer-size))
-        #++(cffi:with-foreign-object (p :char buffer-size)
-             (funcall (writer ssbo) (data ssbo) p buffer-size)
-             (%gl:named-buffer-sub-data (buffer ssbo) 0 (ssbo-size ssbo) p))))
+          (if (buffer ssbo)
+              (resize (buffer ssbo) buffer-size :copy-octets nil)
+              (setf (buffer ssbo)
+                    (make-instance 'buffer :size buffer-size
+                                           :flags '(:dynamic-storage)))))
+        (assert (<= buffer-size (size (buffer ssbo))))
+        (cffi:with-foreign-object (p :char buffer-size)
+          (funcall (writer ssbo) (data ssbo) p buffer-size
+                   :entries (variable-size-data ssbo))
+          (%gl:named-buffer-sub-data (name (buffer ssbo))
+                                     0 buffer-size p)))
+      (setf (dirty ssbo) nil))
     ;; bind buffer
     (when (buffer ssbo)
       (bind-buffer-base :shader-storage-buffer index (buffer ssbo)))))

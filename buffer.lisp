@@ -64,25 +64,34 @@
       (null ;; no data, do nothing
        nil))))
 
-#++
 (defmethod bind-buffer-base (target index (o buffer))
-  (break "bind ~s ~s ~s~%" target index o)
   (%gl:bind-buffer-base target index (name o)))
 
 (define-cffi-enum-compile-macro bind-buffer-base
   %gl:enum nil nil)
 
-(defmethod resize ((o buffer) octets &key (copy-octets (size o)))
+(defmethod resize ((o buffer) octets &key (copy-octets (size o))
+                                       data-pointer data-size)
   (let ((b (gl:create-buffer)))
-    (format t "~&allocated buffer ~s~%" b)
-    (format t "  -> buffer ~s size ~s flags ~s~%" b
-            (size o) (cffi:foreign-bitfield-symbols '%gl::mapbufferusagemask
-                                                    (flags o)))
-    (gl:named-buffer-storage b (cffi:null-pointer) (flags o) :end octets)
-    (when (and (%name o) copy-octets)
-      (%gl:copy-named-buffer-sub-data (%name o) b 0 0
-                                      (min copy-octets (size o)))
-      (format t "delete buffer ~s~%" (%name o))
+    (cond
+      ;; option to fill buffer on creation for immutable data
+      ((and data-pointer (not copy-octets)
+            (or (not data-size) (= data-size octets)))
+       (gl:named-buffer-storage b data-pointer (flags o) :end octets))
+      (t ;; otherwise copy part and fill rest from specified pointer
+       (gl:named-buffer-storage b (cffi:null-pointer) (flags o) :end octets)
+       (when (and (%name o) copy-octets)
+         (%gl:copy-named-buffer-sub-data (%name o) b 0 0
+                                         (min copy-octets (size o))))
+       (when data-pointer (assert data-size))
+       (when data-pointer
+         (let* ((offset (or copy-octets 0))
+                (size (or data-size (- octets offset))))
+           (assert (<= (+ offset size) octets))
+           (%gl:named-buffer-sub-data (%name o)
+                                      offset size
+                                      data-pointer)))))
+    (when (%name o)
       (gl:delete-buffers (list (shiftf (%name o) nil))))
     (setf (%name o) b
           (%size o) octets)
@@ -90,7 +99,6 @@
 
 (defmethod destroy ((o buffer))
   (when (name o)
-    (format t "delete buffer ~s~%" (%name o))
     (gl:delete-buffers (list (shiftf (%name o) nil))))
     (setf (%size o) 0))
 
@@ -110,8 +118,8 @@
 (defmethod initialize-instance :after ((o lock) &key)
   (setf (%sync o) (%gl:fence-sync :sync-gpu-commands-complete 0)))
 
-(defmethod destroy ((o buffer))
-  (when (sync o)
+(defmethod destroy ((o lock))
+  (when (%sync o)
     (%gl:delete-sync (shiftf (%sync o) nil))))
 
 (defclass locked-range (lock range)
