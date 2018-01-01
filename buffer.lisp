@@ -46,10 +46,10 @@
   (setf flags (if (or (symbolp flags) (consp flags))
                   (cffi:foreign-bitfield-value '%gl::mapbufferusagemask flags)
                   flags))
-  (setf (%name o) (gl:create-buffer))
   (setf (%flags o) flags)
   (when data (assert size))
   (when size
+    (setf (%name o) (gl:create-buffer))
     (gl:named-buffer-storage (name o) nil flags :end size)
     (setf (%size o) size)
     (etypecase data
@@ -60,13 +60,15 @@
        nil))))
 
 (defmethod bind-buffer-base (target index (o buffer))
+  (assert (name o))
   (%gl:bind-buffer-base target index (name o)))
 
 (define-cffi-enum-compile-macro bind-buffer-base
   %gl:enum nil nil)
 
-(defmethod resize ((o buffer) octets &key (copy-octets (size o))
-                                       data-pointer data-size)
+(defmethod resize ((o buffer) octets &key copy-octets data-pointer data-size)
+  (when (eql copy-octets t)
+    (setf copy-octets (size o)))
   (let ((b (gl:create-buffer)))
     (cond
       ;; option to fill buffer on creation for immutable data
@@ -95,7 +97,7 @@
 (defmethod destroy ((o buffer))
   (when (name o)
     (gl:delete-buffers (list (shiftf (%name o) nil))))
-    (setf (%size o) 0))
+  (setf (%size o) 0))
 
 (defclass range ()
   ((start :reader start :initarg :start)
