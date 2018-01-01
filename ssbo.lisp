@@ -216,6 +216,16 @@
                      (list fn
                            `(,fn (pointer value)
                                 (cond
+                                  ,@ (when (and (= element-count 16)
+                                                (equal (second type)
+                                                       '(:float 32)))
+                                       ;; fast path for sb-cga:matrix -> 4x4
+                                       `(((typep value 'sb-cga:matrix)
+                                          (loop
+                                            for i below 16
+                                            do (setf (cffi:mem-aref pointer
+                                                                    :float i)
+                                                     (aref value i))))))
                                   ((= (array-total-size value)
                                       ,element-count)
                                    ;; fixme: handle matrix-stride
@@ -277,10 +287,7 @@
           ((cons (eql :vec) (cons (cons (eql :float))))
            (subseq #(0.0 0.0 0.0 1.0) 0 (third type)))
           ((cons (eql :mat))
-           #(1 0 0 0
-             0 1 0 0
-             0 0 1 0
-             0 0 0 1))))))
+           sb-cga:+identity-matrix+)))))
 
 (defun make-slot-writer (slot pointer value)
   (destructuring-bind (&key type offset &allow-other-keys) slot
