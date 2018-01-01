@@ -48,13 +48,8 @@
                   flags))
   (setf (%name o) (gl:create-buffer))
   (setf (%flags o) flags)
-  (format t "~&allocated buffer ~s~%" (name o))
   (when data (assert size))
   (when size
-    (format t "  -> buffer ~s size ~s flags ~s/~s~%" (name o)
-            size  (flags o)
-            (cffi:foreign-bitfield-symbols '%gl::mapbufferusagemask
-                                           (flags o)))
     (gl:named-buffer-storage (name o) nil flags :end size)
     (setf (%size o) size)
     (etypecase data
